@@ -8,7 +8,6 @@ python ^= 3.10
 ```
 Caso queira instalar o python utilizando [**Anaconda**](https://www.anaconda.com/)
 ```py
-# Criando ambiente virtual (-n é para enviar o nome do ambiente)
 conda create -n googlesheets python=3.10
 conda activate googlesheets
 ```
