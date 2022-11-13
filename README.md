@@ -41,5 +41,5 @@ if __name__ == '__main__':
 python google_sheets.py
 ```
 5. Ele irá solicitar que você logue em sua conta Google
-6. Após logar, será gerado um arquivo `token.json` **NÃO COMPARTILHE ELE!** Ele que lhe manterá logado e permite acessar o conteúdo de sua conta
+6. Após logar, será gerado um arquivo `token.json` ⚠️ **NÃO COMPARTILHE ELE!** ⚠️ Ele que lhe manterá logado e permite acessar o conteúdo de sua conta
 7. Observe que as modificações foram realizadas em sua Planilha
