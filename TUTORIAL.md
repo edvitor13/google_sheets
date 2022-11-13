@@ -29,10 +29,14 @@ python google_sheets.py
 **7.** Caso seja o primeiro acesso, ele solicitará permissão através do Navegador
 
 ![tela de permissão](https://cdn.discordapp.com/attachments/979061713171251243/1041449297104867348/image.png)
+
 Se você tiver colocado sua aplicação no modo `Produção` talvez apareça a seguinte mensagem:
+
 ![alerta google](https://media.discordapp.net/attachments/979061713171251243/1041450000158306356/image.png)
+
 Basta clicar em `avançado` e prosseguir clicando em `Acessar NOME_APLICACAO (não seguro)` 
 Após isso basta permitir que as planilhas google possam ser acessadas e clique em `Continuar`
+
 ![autorizando acesso](https://cdn.discordapp.com/attachments/979061713171251243/1041450990496395274/image.png)
 
 **8.** Gerá gerado um arquivo `token.json` que lhe manterá logado enquanto o arquivo estiver lá ⚠️ **NÃO COMPARTILHE ELE!** ⚠️
