@@ -16,7 +16,7 @@ python -m pip install --upgrade google-api-python-client google-auth-httplib2 go
 ### Como utilizar
 1. Crie um arquivo chamado `client_secret.json` no diretório da aplicação
 2. Este arquivo deve conter as informações de acesso de sua aplicação Google, para que permita o login e autorização de acesso às planilhas de sua conta Google
-    - [📄 Guia de Como Gerar este Arquivo](https://developers.google.com/sheets/api/quickstart/python)
+    - [📄 Tutorial Criação Aplicação Google](TUTORIAL.md)
 3. Modifique o código `main` no final do arquivo `google_sheets.py` (Apenas adicionando o ID de sua planilha em branco o teste irá funcionar)
 ```py
 if __name__ == '__main__':
