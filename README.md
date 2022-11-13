@@ -6,9 +6,15 @@ Módulo criado com o objetivo de facilitar a edição de planilhas do Google.
 ```py
 python ^= 3.10
 ```
+Caso queira instalar o python utilizando [**Anaconda**](https://www.anaconda.com/)
+```py
+# Criando ambiente virtual (-n é para enviar o nome do ambiente)
+conda create -n googlesheets python=3.10
+conda activate googlesheets
+```
 
 ### Dependências
-Envie o seguinte comando para instalar as dependências Google
+Envie o seguinte comando para instalar as [dependências Google](https://developers.google.com/sheets/api/quickstart/python)
 ```
 python -m pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 ```
