@@ -1,5 +1,3 @@
-from __future__ import print_function
-from copy import deepcopy
 from typing import Optional
 import os.path
 import re
@@ -58,18 +56,6 @@ class GoogleSheets:
             return None
 
 
-    def update(self, values: list[list], range: str) -> int:
-        body = {
-            "values": values
-        }
-
-        result = self.service.spreadsheets().values().update( # type: ignore
-            spreadsheetId=self.sheet_id, range=range,
-            valueInputOption="USER_ENTERED", body=body).execute()
-
-        return int(result.get('updatedCells'))
-
-
     def _range_to_grid_range(self, range: str, sheetpage_id: int=None) -> dict:
 
         def _get_column_index(range: str) -> Optional[int]:
@@ -125,6 +111,18 @@ class GoogleSheets:
         return result
 
 
+    def update(self, values: list[list], range: str) -> int:
+        body = {
+            "values": values
+        }
+
+        result = self.service.spreadsheets().values().update( # type: ignore
+            spreadsheetId=self.sheet_id, range=range,
+            valueInputOption="USER_ENTERED", body=body).execute()
+
+        return int(result.get('updatedCells'))
+
+
     def sheetpage_name_by_range(self, range: str):
         return range.split("!", 1)[0]
 
@@ -148,67 +146,64 @@ class GoogleSheets:
         each_cell: bool = True,
         style: BorderStyle = BorderStyle.SOLID
     ) -> bool:
-        IS_FAIL = False
-
         def _execute_spreadsheets(body: dict):
-            nonlocal IS_FAIL
             try:
                 self.service.spreadsheets().batchUpdate(
                     spreadsheetId=self.sheet_id, body=body
                 ).execute() 
+                return True
             except Exception as e:
                 print(e)
-                IS_FAIL = True
+                return False
 
         _range: dict = self._range_to_grid_range(
             _range, self.sheetpage_id_by_name(_range)
         )
 
+        _borders = {
+            "top": {
+                "style": style.value
+            },
+            "bottom": {
+                "style": style.value
+            },
+            "left": {
+                "style": style.value
+            },
+            "right": {
+                "style": style.value
+            }
+        }
+
         body = {
             "requests": [
                 {
                     "updateBorders": {
-                        "range": deepcopy(_range),
-                        "top": {
-                            "style": style.value
-                        },
-                        "bottom": {
-                            "style": style.value
-                        },
-                        "left": {
-                            "style": style.value
-                        },
-                        "right": {
-                            "style": style.value
-                        }
+                        "range": _range,
+                        **_borders
                     }
                 }
             ]
         }
 
-        if (
-            each_cell 
-            and _range['startRowIndex'] is not None
-            and _range['endRowIndex'] is not None
-            and _range['startColumnIndex'] is not None
-            and _range['endColumnIndex'] is not None
-        ):
-            for row in reversed(range(_range['startRowIndex'], _range['endRowIndex'])):
-                br = body['requests'][0]['updateBorders']['range']
-                br['startRowIndex'] = row
-                br['endRowIndex'] = row + 1
+        if each_cell:
+            body = {
+                "requests": [
+                    {
+                        "repeatCell": {
+                            "range": _range,
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "borders": {**_borders}
+                                }
+                            },
+                            "fields": "userEnteredFormat"
+                        }
+                    }
+                ]
+            }
 
-                for col in range(_range['startColumnIndex'], _range['endColumnIndex']):
-                    br['startColumnIndex'] = col
-                    br['endColumnIndex'] = col + 1
-
-                    _execute_spreadsheets(body)
-
-            return not IS_FAIL
-
-        _execute_spreadsheets(body)
-
-        return not IS_FAIL
+        return _execute_spreadsheets(body)
 
 
     def select(self, range: str):
@@ -239,5 +234,5 @@ if __name__ == '__main__':
 
     print(gs.update(data, RANGE))
     print(gs.sheetpage_id_by_name(RANGE))
-    print(gs.add_border(f"{RANGE}{len(data)+1}"))
+    print(gs.add_border(f"{RANGE}{len(data)+1}", each_cell=True))
     print(gs.select(RANGE))
