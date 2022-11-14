@@ -72,7 +72,7 @@ class GoogleSheets:
 
 
         def _get_row_number(range: str) -> Optional[int]:
-            find = re.findall("[1-9]+", range)
+            find = re.findall("[0-9]+", range)
             
             if len(find) < 1:
                 return None 
