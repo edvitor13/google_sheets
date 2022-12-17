@@ -153,28 +153,18 @@ class Range():
 
     
     def __init__(self, *args) -> None:
-        if len(args) == 1:
-            self._load_by_range(*args)
-        
-        elif len(args) == 3:
-            sheetname = args[0]
-            start = args[1]
-            end = args[2]
-
-            range = "" if sheetname is None else f"{sheetname}!"
-            range += f"{start}"
-            range += "" if end is None else f":{end}"
-
-            self._load_by_range(range)
-        
-        elif len(args) == 5:
-            self._load_by_number(*args)
-        
-        else:
-            raise EmptyRangeException(
-                "A Range is required, "
-                "use the example structure: PageName!A6:F10")
-        
+        match len(args):
+            case 1:
+                self._load_by_range(*args)
+            case 3:
+                self._load_by_detached_range(args[0], args[1], args[2])
+            case 5:
+                self._load_by_number(*args)
+            case _:
+                raise EmptyRangeException(
+                    "A Range is required, "
+                    "use the example structure: PageName!A6:F10")
+            
         self.__consistency_adjust()
 
 
@@ -203,6 +193,19 @@ class Range():
         self._end_row = self._get_row_number(extract[4])
 
         return self
+
+    
+    def _load_by_detached_range(
+        self, 
+        sheetname: str | None, 
+        start: str, 
+        end: str | None = None
+    ) -> Range:
+        range = "" if sheetname is None else f"{sheetname}!"
+        range += f"{start}"
+        range += "" if end is None else f":{end}"
+
+        return self._load_by_range(range)
 
     
     def _load_by_number(
