@@ -2,6 +2,7 @@ from typing import Optional
 import os.path
 import re
 from enum import Enum
+from dataclasses import dataclass
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -19,6 +20,99 @@ class BorderStyle(Enum):
     SOLID_THICK = "SOLID_THICK"
     NONE = "NONE"
     DOUBLE = "DOUBLE"
+
+
+class ThemeColorType(Enum):
+    THEME_COLOR_TYPE_UNSPECIFIED = "THEME_COLOR_TYPE_UNSPECIFIED"
+    TEXT = "TEXT"
+    BACKGROUND = "BACKGROUND"
+    ACCENT1 = "ACCENT1"
+    ACCENT2 = "ACCENT2"
+    ACCENT3 = "ACCENT3"
+    ACCENT4 = "ACCENT4"
+    ACCENT5 = "ACCENT5"
+    ACCENT6 = "ACCENT6"
+    LINK = "LINK"
+
+
+@dataclass
+class BorderDirection:
+    top: bool = True
+    bottom: bool = True
+    left: bool = True
+    right: bool = True
+
+
+
+class Color():
+
+    def __init__(
+        self,
+        red: float, 
+        green: float, 
+        blue: float, 
+        alpha: float = 1.0
+    ) -> None:
+        self.red = self._check_color_range(red)
+        self.green = self._check_color_range(green)
+        self.blue = self._check_color_range(blue)
+        self.alpha = self._check_color_range(alpha)
+
+    
+    def _check_color_range(self, color: float) -> float:
+        if color < 0 or color > 1:
+            raise ValueError("Invalid color range, supported range is 0 to 1")
+        return color
+
+    
+    def rgb(self) -> tuple[float, float, float]:
+        return (self.red, self.green, self.blue)
+
+
+    def rgba(self) -> tuple[float, float, float, float]:
+        return (self.red, self.green, self.blue, self.alpha)
+
+
+    def dict(self) -> dict:
+        return {
+            "red": self.red,
+            "green": self.green,
+            "blue": self.blue,
+            "alpha": self.alpha
+        }
+
+
+    def __str__(self) -> str:
+        return f"Color{self.rgba()}"
+
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+
+class ColorRGBA(Color):
+
+    def __init__(
+        self, 
+        red: int, 
+        green: int, 
+        blue: int, 
+        alpha: float = 1.0
+    ) -> None:
+        super().__init__(
+            self.__check_convert_color_range(red), 
+            self.__check_convert_color_range(green), 
+            self.__check_convert_color_range(blue), 
+            alpha
+        )
+
+
+    def __check_convert_color_range(self, color: int) -> float:
+        if color < 0 or color > 255:
+            raise ValueError("Invalid color range, supported range is 0 to 255")
+        return float(color / 255)
+
 
 
 class GoogleSheets:
@@ -56,9 +150,16 @@ class GoogleSheets:
             return None
 
 
-    def _range_to_grid_range(self, range: str, sheetpage_id: int=None) -> dict:
+    def _range_to_grid_range(
+        self, 
+        range: str, 
+        sheetpage_id: Optional[int] = None
+    ) -> dict:
 
-        def _get_column_index(range: str) -> Optional[int]:
+        def _get_column_index(range: Optional[str]) -> Optional[int]:
+            if range is None:
+                return None
+
             find = re.findall("[A-Z]", range)
             
             if len(find) < 1:
@@ -71,7 +172,10 @@ class GoogleSheets:
             return (index)
 
 
-        def _get_row_number(range: str) -> Optional[int]:
+        def _get_row_number(range: Optional[str]) -> Optional[int]:
+            if range is None:
+                return None
+            
             find = re.findall("[0-9]+", range)
             
             if len(find) < 1:
@@ -87,10 +191,16 @@ class GoogleSheets:
         start = _range_split[0]
         end = _range_split[1] if len(_range_split) > 1 else None
         
-        start_row: Optional[int] = (_get_row_number(start) - 1)
-        start_column: Optional[int] = (_get_column_index(start) - 1)
+        start_row: Optional[int] = _get_row_number(start)
+        start_column: Optional[int] = _get_column_index(start)
         end_row: Optional[int] = _get_row_number(end)
         end_column: Optional[int] = _get_column_index(end)
+
+        if start_row is not None:
+            start_row -= 1
+        
+        if start_column is not None:
+            start_column -= 1
         
         result = {
             "sheetId": sheetpage_id
@@ -129,7 +239,7 @@ class GoogleSheets:
 
     def sheetpage_id_by_name(self, name_range: str):
         try:
-            obj = self.service.spreadsheets().get(
+            obj = self.service.spreadsheets().get( # type: ignore
                 spreadsheetId=self.sheet_id, 
                 ranges=self.sheetpage_name_by_range(name_range), 
                 fields='sheets(data(rowData(values(userEnteredFormat))),properties(sheetId))'
@@ -142,13 +252,15 @@ class GoogleSheets:
 
     def add_border(
         self, 
-        _range: str, 
+        _range: str,   # type: ignore
         each_cell: bool = True,
-        style: BorderStyle = BorderStyle.SOLID
+        style: BorderStyle | None = BorderStyle.SOLID,
+        color: Color | ThemeColorType | None = Color(0, 0, 0),
+        direction: BorderDirection = BorderDirection()
     ) -> bool:
         def _execute_spreadsheets(body: dict):
             try:
-                self.service.spreadsheets().batchUpdate(
+                self.service.spreadsheets().batchUpdate(  # type: ignore
                     spreadsheetId=self.sheet_id, body=body
                 ).execute() 
                 return True
@@ -159,21 +271,22 @@ class GoogleSheets:
         _range: dict = self._range_to_grid_range(
             _range, self.sheetpage_id_by_name(_range)
         )
-
-        _borders = {
-            "top": {
-                "style": style.value
-            },
-            "bottom": {
-                "style": style.value
-            },
-            "left": {
-                "style": style.value
-            },
-            "right": {
+        
+        _borders = dict()
+        if style is not None:
+            _border_style = {
                 "style": style.value
             }
-        }
+
+            if type(color) is ThemeColorType:
+                _border_style['colorStyle'] = { "themeColor": color.value }
+            elif isinstance(color, Color):
+                _border_style['colorStyle'] = { "rgbColor": color.dict() }
+
+            if direction.top: _borders['top'] = _border_style
+            if direction.bottom: _borders['bottom'] = _border_style
+            if direction.left: _borders['left'] = _border_style
+            if direction.right: _borders['right'] = _border_style
 
         body = {
             "requests": [
@@ -206,6 +319,22 @@ class GoogleSheets:
         return _execute_spreadsheets(body)
 
 
+    def clear_border(
+        self, 
+        _range: str,   # type: ignore
+        each_cell: bool = True,
+        direction: BorderDirection = BorderDirection()
+    ) -> bool:
+        return self.add_border(_range, each_cell, None, None, direction)
+
+
+    def clear_values(self, range: str):
+        request = self.service.spreadsheets().values().clear( # type: ignore
+            spreadsheetId=self.sheet_id, range=range, body={})
+        
+        return request.execute()
+    
+
     def select(self, range: str):
         result = self.service.spreadsheets().values().get( # type: ignore
             spreadsheetId=self.sheet_id, range=range).execute()
@@ -214,10 +343,18 @@ class GoogleSheets:
         return rows
 
     
+    def is_valid_sheet(self) -> bool:
+        try:
+            self.service.spreadsheets().values().get( # type: ignore
+                spreadsheetId=self.sheet_id, range="A1").execute()
+            return True
+        except:
+            return False
+
+
     @staticmethod
     def login():
         GoogleSheets("")
-
 
 
 if __name__ == '__main__':
