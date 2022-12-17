@@ -152,9 +152,9 @@ class Range():
         ...
 
     
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args) -> None:
         if len(args) == 1:
-            self._load_by_range(*args, **kwargs)
+            self._load_by_range(*args)
         
         elif len(args) == 3:
             sheetname = args[0]
@@ -168,7 +168,7 @@ class Range():
             self._load_by_range(range)
         
         elif len(args) == 5:
-            self._load_by_number(*args, **kwargs)
+            self._load_by_number(*args)
         
         else:
             raise EmptyRangeException(
