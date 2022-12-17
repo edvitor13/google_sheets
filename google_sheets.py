@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional
+from typing import Any, Optional
 import os.path
 import re
 from enum import Enum
@@ -11,6 +11,13 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
 from googleapiclient.errors import HttpError
+
+
+class InvalidRangeException(Exception):
+    pass
+
+class EmptyRangeException(Exception):
+    pass
 
 
 class BorderStyle(Enum):
@@ -116,7 +123,7 @@ class ColorRGBA(Color):
         return float(color / 255)
 
 
-class Range:
+class Range():
 
     _sheetname: str | None
     _start_row: int | None
@@ -125,56 +132,205 @@ class Range:
     _end_col: int | None
 
     @overload
-    def __init__(self, range: str) -> None:
-        self.__consistency_adjust()
+    def __init__(self, range: str | Range):
+        ...
 
     @overload
-    def __init__(self, sheetname: str, start: str, end: str) -> None:
-        self.__consistency_adjust()
+    def __init__(
+        self, sheetname: str | None, start: str, end: str | None = None):
+        ...
 
     @overload
     def __init__(
         self, 
         sheetname: str | None, 
-        start_row: int | None, 
         start_col: int | None,
-        end_row: int | None,
-        end_col: int | None
+        start_row: int | None, 
+        end_col: int | None,
+        end_row: int | None
     ) -> None:
+        ...
+
+    
+    def __init__(self, *args, **kwargs) -> None:
+        if len(args) == 1:
+            self._load_by_range(*args, **kwargs)
+        
+        elif len(args) == 3:
+            sheetname = args[0]
+            start = args[1]
+            end = args[2]
+
+            range = "" if sheetname is None else f"{sheetname}!"
+            range += f"{start}"
+            range += "" if end is None else f":{end}"
+
+            self._load_by_range(range)
+        
+        elif len(args) == 5:
+            self._load_by_number(*args, **kwargs)
+        
+        else:
+            raise EmptyRangeException(
+                "A Range is required, "
+                "use the example structure: PageName!A6:F10")
+        
         self.__consistency_adjust()
+
+
+    def _load_by_range(self, _range: str | Range) -> Range:
+        
+        if isinstance(_range, Range):
+            self._sheetname = _range._sheetname
+            self._start_row = _range._start_row
+            self._start_col = _range._start_col
+            self._end_row = _range._end_row
+            self._end_col = _range._end_col
+
+            return self
+
+        extract: list[str | None] = self._extract_range(_range)
+
+        if extract is None or len(extract) != 5:
+            raise InvalidRangeException(
+                f"Range '{_range}' in invalid format, "
+                "use the example structure: PageName!A6:F10")
+        
+        self._sheetname = extract[0]
+        self._start_col = self._get_column_number(extract[1])
+        self._start_row = self._get_row_number(extract[2])
+        self._end_col = self._get_column_number(extract[3])
+        self._end_row = self._get_row_number(extract[4])
+
+        return self
+
+    
+    def _load_by_number(
+        self, 
+        sheetname: str | None, 
+        start_col: int | None,
+        start_row: int | None, 
+        end_col: int | None,
+        end_row: int | None,
+    ) -> Range:
+        self._sheetname = sheetname
+        self._start_row = start_row
+        self._start_col = start_col
+        self._end_row = end_row
+        self._end_col = end_col
+
+        return self
+
+    
+    def _extract_range(self, _range: str) -> list | None:
+        regexs = (
+            r'^(.+!)?([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$',
+            r'|^(.+!)?([A-Z]+)([0-9]+):([A-Z]+)()$',
+            r'|^(.+!)?([A-Z]+)([0-9]+)()()$'
+        )
+
+        findall = re.findall("".join(regexs), _range)
+
+        if len(findall) == 0:
+            return None
+
+        find = tuple(map(lambda r: r if r else None, findall[0]))
+
+        result: list[str | None] = [None, None, None, None, None]
+        for i in range(len(regexs)):
+            for j in range(len(result)):
+                try:
+                    if result[j] is None:
+                        result[j] = find[j + len(result) * i]
+                except IndexError:
+                    result[j] = None
+        
+        if result[0] is not None and result[0][-1] == "!":
+            result[0] = result[0][:-1]
+
+        return result
 
     
     def __consistency_adjust(self) -> Range:
         if self._start_row is None or self._start_row < 0:
-            self._start_row = 0
+            self._start_row = 1
         
-        if self._end_row is None or self._end_row < self._start_row:
+        if self._end_row is not None and self._end_row < self._start_row:
             self._end_row = self._start_row
         
         if self._start_col is None or self._start_col < 0:
             self._start_col = 1
         
-        if self._end_col is None or self._end_col < self._start_col:
+        if self._end_col is not None and self._end_col < self._start_col:
             self._end_col = self._start_col
 
         return self
 
 
+    def _get_column_number(self, name: str | None) -> int | None:
+        if name is None:
+            return None
+
+        find = re.findall("[A-Z]", name)
+        
+        if len(find) < 1:
+            return None
+
+        index = 0
+        for letter in find:
+            index = index * 26 + 1 + ord(letter) - ord('A')
+
+        return (index)
+
+    
+    def _get_row_number(self, number: str | None) -> int | None:
+        if number is None:
+            return None
+        
+        find = re.findall("[0-9]+", number)
+        
+        if len(find) < 1:
+            return None 
+        
+        return int(find[0])
+
+
+    def _get_column_name(self, number: int | None) -> str | None:
+        if number is None:
+            return None
+
+        result = ''
+
+        while number > 0:
+            index = (number - 1) % 26
+            result += chr(index + ord('A'))
+            number = (number - 1) // 26
+
+        if result == '':
+            return None
+
+        return result[::-1]
+
+
     def _calc_row_col(
-        self, *, 
+        self, 
         attr: str,
+        *,
         add: int | None = None,
         sub: int | None = None,
         change: int | None = None
     ) -> Range | int | None:
         val = getattr(self, attr)
 
-        if val is None or (
+        if (
             add is None 
             and sub is None
             and change is None
         ):
             return self
+        
+        if val is None:
+            val = 0
         
         if add is not None:
             val += add
@@ -218,7 +374,114 @@ class Range:
         return self._start_col
     
     def get_start_letter(self) -> str:
-        return self.get_start_col()
+        return self._get_column_name(self.get_start_col())
+
+    def get_start(self) -> str:
+        return f"{self.get_start_letter()}{self.get_start_row()}"
+
+
+    def add_end_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_row', add=val)
+    
+    def sub_end_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_row', sub=val)
+    
+    def set_end_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_row', change=val)
+    
+    def get_end_row(self) -> int:
+        return self._end_row
+
+
+    def add_end_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_col', add=val)
+    
+    def sub_end_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_col', sub=val)
+    
+    def set_end_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_end_col', change=val)
+    
+    def get_end_col(self) -> int | None:
+        return self._end_col
+    
+    def get_end_letter(self) -> str | None:
+        return self._get_column_name(self.get_end_col())
+
+    def get_end(self) -> str | None:
+        if self.get_end_letter() is None and self.get_end_row() is None:
+            return None
+        
+        if self.get_end_row() is None:
+            return self.get_end_letter()
+
+        return f"{self.get_end_letter()}{self.get_end_row()}"
+    
+
+    def set_sheetname(self, sheetname: str | None) -> Range:
+        self._sheetname = sheetname
+        return self
+    
+    def get_sheetname(self) -> str | None:
+        return self._sheetname
+
+    
+    def get_range(self) -> str:
+        _range = \
+            "" if self.get_sheetname() is None else f"{self.get_sheetname()}!"
+        _range += self.get_start()
+        _range += "" if self.get_end() is None else f":{self.get_end()}"
+            
+        return _range
+
+
+    def get_google_sheet_api_format(
+        self, google_sheets: GoogleSheets | None = None
+    ) -> dict[str, Any]:
+
+        sheetpage_id = None
+        if google_sheets is not None:
+            sheetpage_id = google_sheets.sheetpage_id_by_name(
+                self.get_sheetname())
+
+        start_row = (self.get_start_row() - 1)
+        start_col = (self.get_start_col() - 1)
+        end_row = self.get_end_row()
+        end_col = self.get_end_col()
+        
+        result = {
+            "sheetId": sheetpage_id,
+            "startRowIndex": start_row,
+            "startColumnIndex": start_col
+        }
+
+        if end_row is not None:
+            result["endRowIndex"] = end_row
+
+        if end_col is not None:
+            result["endColumnIndex"] = end_col
+        
+        return result
+
+
+    def get_dict(self) -> dict[str, str | int]:
+        return {
+            "sheetname": self.get_sheetname(), 
+            "start_row": self.get_start_row(), 
+            "start_col": self.get_start_col(),
+            "end_row": self.get_end_row(),
+            "end_col": self.get_end_col()
+        }
+
+
+    def __str__(self) -> str:
+        return self.get_range()
+
+    
+    def __repr__(self) -> str:
+        return f"Range<{self.__str__()}>"
+
+
 
 
 class GoogleSheets:
@@ -256,84 +519,13 @@ class GoogleSheets:
             return None
 
 
-    def _range_to_grid_range(
-        self, 
-        range: str, 
-        sheetpage_id: Optional[int] = None
-    ) -> dict:
-
-        def _get_column_index(range: Optional[str]) -> Optional[int]:
-            if range is None:
-                return None
-
-            find = re.findall("[A-Z]", range)
-            
-            if len(find) < 1:
-                return None
-
-            index = 0
-            for letter in find:
-                index = index * 26 + 1 + ord(letter) - ord('A')
-
-            return (index)
-
-
-        def _get_row_number(range: Optional[str]) -> Optional[int]:
-            if range is None:
-                return None
-            
-            find = re.findall("[0-9]+", range)
-            
-            if len(find) < 1:
-                return None 
-            
-            return (int(find[0]))
-
-
-        if "!" in range:
-            range = range.split("!", 1)[1]
-        
-        _range_split = range.split(":", 1)
-        start = _range_split[0]
-        end = _range_split[1] if len(_range_split) > 1 else None
-        
-        start_row: Optional[int] = _get_row_number(start)
-        start_column: Optional[int] = _get_column_index(start)
-        end_row: Optional[int] = _get_row_number(end)
-        end_column: Optional[int] = _get_column_index(end)
-
-        if start_row is not None:
-            start_row -= 1
-        
-        if start_column is not None:
-            start_column -= 1
-        
-        result = {
-            "sheetId": sheetpage_id
-        }
-        
-        if start_row is not None:
-            result["startRowIndex"] = start_row
-        
-        if start_column is not None:
-            result["startColumnIndex"] = start_column
-
-        if end_row is not None:
-            result["endRowIndex"] = end_row
-        
-        if end_column is not None:
-            result["endColumnIndex"] = end_column
-        
-        return result
-
-
-    def update(self, values: list[list], range: str) -> int:
+    def update(self, values: list[list], _range: Range) -> int:
         body = {
             "values": values
         }
 
         result = self.service.spreadsheets().values().update( # type: ignore
-            spreadsheetId=self.sheet_id, range=range,
+            spreadsheetId=self.sheet_id, range=_range.get_range(),
             valueInputOption="USER_ENTERED", body=body).execute()
 
         return int(result.get('updatedCells'))
@@ -358,12 +550,13 @@ class GoogleSheets:
 
     def add_border(
         self, 
-        _range: str,   # type: ignore
+        _range: Range,   # type: ignore
         each_cell: bool = True,
         style: BorderStyle | None = BorderStyle.SOLID,
         color: Color | ThemeColorType | None = Color(0, 0, 0),
         direction: BorderDirection = BorderDirection()
     ) -> bool:
+
         def _execute_spreadsheets(body: dict):
             try:
                 self.service.spreadsheets().batchUpdate(  # type: ignore
@@ -373,11 +566,8 @@ class GoogleSheets:
             except Exception as e:
                 print(e)
                 return False
-
-        _range: dict = self._range_to_grid_range(
-            _range, self.sheetpage_id_by_name(_range)
-        )
         
+
         _borders = dict()
         if style is not None:
             _border_style = {
@@ -394,11 +584,13 @@ class GoogleSheets:
             if direction.left: _borders['left'] = _border_style
             if direction.right: _borders['right'] = _border_style
 
+        _range_api_format = _range.get_google_sheet_api_format(self)
+
         body = {
             "requests": [
                 {
                     "updateBorders": {
-                        "range": _range,
+                        "range": _range_api_format,
                         **_borders
                     }
                 }
@@ -410,7 +602,7 @@ class GoogleSheets:
                 "requests": [
                     {
                         "repeatCell": {
-                            "range": _range,
+                            "range": _range_api_format,
                             "cell": {
                                 "userEnteredFormat": {
                                     "borders": {**_borders}
@@ -427,23 +619,23 @@ class GoogleSheets:
 
     def clear_border(
         self, 
-        _range: str,   # type: ignore
+        _range: Range,   # type: ignore
         each_cell: bool = True,
         direction: BorderDirection = BorderDirection()
     ) -> bool:
         return self.add_border(_range, each_cell, None, None, direction)
 
 
-    def clear_values(self, range: str):
+    def clear_values(self, _range: Range):
         request = self.service.spreadsheets().values().clear( # type: ignore
-            spreadsheetId=self.sheet_id, range=range, body={})
+            spreadsheetId=self.sheet_id, range=_range.get_range(), body={})
         
         return request.execute()
     
 
-    def select(self, range: str):
+    def select(self, _range: Range):
         result = self.service.spreadsheets().values().get( # type: ignore
-            spreadsheetId=self.sheet_id, range=range).execute()
+            spreadsheetId=self.sheet_id, range=_range.get_range()).execute()
         rows = result.get('values', [])
         
         return rows
@@ -464,7 +656,7 @@ class GoogleSheets:
 
 
 if __name__ == '__main__':
-    RANGE = "Página1!B2:C"
+    rg = Range("Página1!B2:C")
     gs = GoogleSheets('ADICIONE O ID DE SUA PLANILHA')
     
     data = [
@@ -475,7 +667,7 @@ if __name__ == '__main__':
         ["Mais", "Um Teste"]
     ]
 
-    print(gs.update(data, RANGE))
-    print(gs.sheetpage_id_by_name(RANGE))
-    print(gs.add_border(f"{RANGE}{len(data)+1}", each_cell=True))
-    print(gs.select(RANGE))
+    print(gs.update(data, rg))
+    print(gs.sheetpage_id_by_name(rg))
+    print(gs.add_border(rg.add_end_row(len(data) + 1), each_cell=True))
+    print(gs.select(rg))
