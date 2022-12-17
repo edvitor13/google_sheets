@@ -1,8 +1,10 @@
+from __future__ import annotations
 from typing import Optional
 import os.path
 import re
 from enum import Enum
 from dataclasses import dataclass
+from typing import overload
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -113,6 +115,110 @@ class ColorRGBA(Color):
             raise ValueError("Invalid color range, supported range is 0 to 255")
         return float(color / 255)
 
+
+class Range:
+
+    _sheetname: str | None
+    _start_row: int | None
+    _start_col: int | None
+    _end_row: int | None
+    _end_col: int | None
+
+    @overload
+    def __init__(self, range: str) -> None:
+        self.__consistency_adjust()
+
+    @overload
+    def __init__(self, sheetname: str, start: str, end: str) -> None:
+        self.__consistency_adjust()
+
+    @overload
+    def __init__(
+        self, 
+        sheetname: str | None, 
+        start_row: int | None, 
+        start_col: int | None,
+        end_row: int | None,
+        end_col: int | None
+    ) -> None:
+        self.__consistency_adjust()
+
+    
+    def __consistency_adjust(self) -> Range:
+        if self._start_row is None or self._start_row < 0:
+            self._start_row = 0
+        
+        if self._end_row is None or self._end_row < self._start_row:
+            self._end_row = self._start_row
+        
+        if self._start_col is None or self._start_col < 0:
+            self._start_col = 1
+        
+        if self._end_col is None or self._end_col < self._start_col:
+            self._end_col = self._start_col
+
+        return self
+
+
+    def _calc_row_col(
+        self, *, 
+        attr: str,
+        add: int | None = None,
+        sub: int | None = None,
+        change: int | None = None
+    ) -> Range | int | None:
+        val = getattr(self, attr)
+
+        if val is None or (
+            add is None 
+            and sub is None
+            and change is None
+        ):
+            return self
+        
+        if add is not None:
+            val += add
+        
+        if sub is not None:
+            val -= sub
+
+        if change is not None:
+            val = change
+
+        setattr(self, attr, val)
+
+        self.__consistency_adjust()
+
+        return self
+
+
+    def add_start_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_row', add=val)
+    
+    def sub_start_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_row', sub=val)
+    
+    def set_start_row(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_row', change=val)
+    
+    def get_start_row(self) -> int:
+        return self._start_row
+
+
+    def add_start_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_col', add=val)
+    
+    def sub_start_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_col', sub=val)
+    
+    def set_start_col(self, val: int | None = None) -> Range:
+        return self._calc_row_col('_start_col', change=val)
+    
+    def get_start_col(self) -> int:
+        return self._start_col
+    
+    def get_start_letter(self) -> str:
+        return self.get_start_col()
 
 
 class GoogleSheets:
