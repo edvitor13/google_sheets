@@ -1,10 +1,8 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Optional, overload
 import os.path
 import re
-from enum import Enum
-from dataclasses import dataclass
-from typing import overload
+from copy import deepcopy, copy
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -12,47 +10,33 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
 from googleapiclient.errors import HttpError
 
+from enums import (
+    BorderStyle,
+    ThemeColorType,
+    CellVerticalAlign,
+    CellHorizontalAlign,
+    CellWrapStrategy,
+    CellTextDirection,
+    TextFontFamily,
+    NumberFormatType
+)
 
-class InvalidRangeException(Exception):
-    pass
+from exceptions import (
+    EmptyRangeException,
+    InvalidRangeException,
+    InvalidSheetException
+)
 
-class EmptyRangeException(Exception):
-    pass
-
-class InvalidSheetException(Exception):
-    pass
-
-
-class BorderStyle(Enum):
-    STYLE_UNSPECIFIED = "STYLE_UNSPECIFIED"
-    DOTTED = "DOTTED"
-    DASHED = "DASHED"
-    SOLID = "SOLID"
-    SOLID_MEDIUM = "SOLID_MEDIUM"
-    SOLID_THICK = "SOLID_THICK"
-    NONE = "NONE"
-    DOUBLE = "DOUBLE"
-
-
-class ThemeColorType(Enum):
-    THEME_COLOR_TYPE_UNSPECIFIED = "THEME_COLOR_TYPE_UNSPECIFIED"
-    TEXT = "TEXT"
-    BACKGROUND = "BACKGROUND"
-    ACCENT1 = "ACCENT1"
-    ACCENT2 = "ACCENT2"
-    ACCENT3 = "ACCENT3"
-    ACCENT4 = "ACCENT4"
-    ACCENT5 = "ACCENT5"
-    ACCENT6 = "ACCENT6"
-    LINK = "LINK"
-
-
-@dataclass
-class BorderDirection:
-    top: bool = True
-    bottom: bool = True
-    left: bool = True
-    right: bool = True
+from dataclass import (
+    BorderDirection,
+    CellPadding,
+    BorderDirection,
+    ColorStyleColor,
+    ColorStyleRgbColor,
+    ColorStyleThemeColor,
+    Link,
+    TextFormat
+)
 
 
 
@@ -92,6 +76,10 @@ class Color():
             "blue": self.blue,
             "alpha": self.alpha
         }
+    
+
+    def to_color_style(self) -> ColorStyleRgbColor:
+        return ColorStyleRgbColor(rgb_color=ColorStyleColor(**self.dict()))
 
 
     def __str__(self) -> str:
@@ -100,7 +88,6 @@ class Color():
 
     def __repr__(self) -> str:
         return self.__str__()
-
 
 
 class ColorRGBA(Color):
@@ -128,6 +115,8 @@ class ColorRGBA(Color):
 
 class Range():
 
+    last_range: Range | None = None
+
     _sheetname: str | None
     _start_row: int | None
     _start_col: int | None
@@ -140,7 +129,7 @@ class Range():
 
     @overload
     def __init__(
-        self, sheetname: str | None, start: str, end: str | None = None):
+        self, sheetname: str | None, start: str, end: str | None):
         ...
 
     @overload
@@ -169,6 +158,13 @@ class Range():
                     "use the example structure: PageName!A6:F10")
             
         self.__consistency_adjust()
+        Range.last_range = self
+
+    
+    def copy(self, _deepcopy: bool = False) -> Range:
+        if _deepcopy:
+            return deepcopy(self)
+        return copy(self)
 
 
     def _load_by_range(self, _range: str | Range) -> Range:
@@ -489,12 +485,15 @@ class Range():
 
 
 
-
 class GoogleSheets:
 
     def __init__(self, sheet_id: str) -> None:
         self.sheet_id: str = sheet_id
         self.service: Resource = self._load_service()
+
+        self.__multi_execute_mode: bool = False
+        self.__multi_batch_updates: list[dict] = []
+        self.__multi_batch_values_updates: list[dict] = []
         
         if not self.is_valid_sheet():
             raise InvalidSheetException(
@@ -567,6 +566,76 @@ class GoogleSheets:
             return None
 
 
+    def _execute_batch_update(
+        self, body: dict, *, cancel_multi_execute: bool=False
+    ):
+        if self.__multi_execute_mode and not cancel_multi_execute:
+            self.__multi_batch_updates.append(body)
+            return self
+
+        try:
+            self.service.spreadsheets().batchUpdate(  # type: ignore
+                spreadsheetId=self.sheet_id, body=body
+            ).execute() 
+            return True
+        except Exception as e:
+            print(e)
+            return False
+
+    
+    def multi_execute(self, *args):
+        try:
+            requests = {"requests": []}
+            for batch in self.__multi_batch_updates:
+                requests["requests"] = [
+                    *requests["requests"], *batch["requests"]]
+            
+            
+        finally:
+            self.__reset_multi_execute()
+
+
+    def __reset_multi_execute(self):
+        self.__multi_execute_mode: bool = False
+        self.__multi_batch_updates: list[dict] = []
+        self.__multi_batch_values_updates: list[dict] = []
+
+
+    def format_text(
+        self,
+        _range: Range,
+        format: TextFormat
+    ) -> bool | GoogleSheets:
+
+        _range_api_format = _range.get_google_sheet_api_format(self)
+
+        body = {
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_api_format,
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": format.dict(
+                                    by_alias=True, exclude_unset=True)
+                            }
+                        },
+                        "fields": "userEnteredFormat.textFormat"
+                    }
+                }
+            ],
+            # "data": [
+            #     {
+            #         "range": _range.get_range(),
+            #         "values": [["oLÁ, TUDO BEM?"], ["Novo Teste"]]
+            #     }
+            # ],
+            # 'valueInputOption': "USER_ENTERED"
+        }
+
+        return self._execute_batch_update(body)
+
+
     def add_border(
         self, 
         _range: Range,   # type: ignore
@@ -574,18 +643,7 @@ class GoogleSheets:
         style: BorderStyle | None = BorderStyle.SOLID,
         color: Color | ThemeColorType | None = Color(0, 0, 0),
         direction: BorderDirection = BorderDirection()
-    ) -> bool:
-
-        def _execute_spreadsheets(body: dict):
-            try:
-                self.service.spreadsheets().batchUpdate(  # type: ignore
-                    spreadsheetId=self.sheet_id, body=body
-                ).execute() 
-                return True
-            except Exception as e:
-                print(e)
-                return False
-        
+    ) -> bool | GoogleSheets:
 
         _borders = dict()
         if style is not None:
@@ -627,13 +685,13 @@ class GoogleSheets:
                                     "borders": {**_borders}
                                 }
                             },
-                            "fields": "userEnteredFormat"
+                            "fields": "userEnteredFormat.borders"
                         }
                     }
                 ]
             }
 
-        return _execute_spreadsheets(body)
+        return self._execute_batch_update(body)
 
 
     def clear_border(
@@ -641,7 +699,7 @@ class GoogleSheets:
         _range: Range,   # type: ignore
         each_cell: bool = True,
         direction: BorderDirection = BorderDirection()
-    ) -> bool:
+    ) -> bool | GoogleSheets:
         return self.add_border(_range, each_cell, None, None, direction)
 
 
@@ -676,7 +734,7 @@ class GoogleSheets:
 
 if __name__ == '__main__':
     rg = Range("Página1!B2:C")
-    gs = GoogleSheets('ADICIONE O ID DE SUA PLANILHA')
+    gs = GoogleSheets('')
     
     data = [
         ["NOME", "IDADE"],
@@ -685,8 +743,36 @@ if __name__ == '__main__':
         ["Novo", "Teste"],
         ["Mais", "Um Teste"]
     ]
+    
+    # Inserindo dados
+    gs.update(data, rg)
 
-    print(gs.update(data, rg))
-    print(gs.sheetpage_id_by_name(rg))
-    print(gs.add_border(rg.add_end_row(len(data) + 1), each_cell=True))
-    print(gs.select(rg))
+    # Adicionando Borda
+    gs.add_border(
+        rg.add_end_row(len(data) + 1)
+    )
+    
+    # Deixando Cabeçalho em Negrito
+    gs.format_text(
+        rg.copy().set_end_row(rg.get_start_row()), 
+        TextFormat(bold=True)
+    )
+    
+    # Mudando fonte do conteúdo para Comic Sans
+    gs.format_text(
+        rg.copy().add_start_row(1), 
+        TextFormat(
+            font_family=TextFontFamily.COMIC_SANS_MS,
+            foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()
+        )
+    )
+
+    gs.update([["3"], ["4"], ["5"]], Range(rg.get_sheetname(), "C4", None))
+
+    gs.format_text(
+        Range.last_range
+        .sub_start_row(1)
+        .set_end_col(Range.last_range.get_start_col())
+        .set_end_row(Range.last_range.get_start_row() + 4),
+        TextFormat(underline=True)
+    )
