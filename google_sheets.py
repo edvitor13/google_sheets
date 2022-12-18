@@ -19,6 +19,9 @@ class InvalidRangeException(Exception):
 class EmptyRangeException(Exception):
     pass
 
+class InvalidSheetException(Exception):
+    pass
+
 
 class BorderStyle(Enum):
     STYLE_UNSPECIFIED = "STYLE_UNSPECIFIED"
@@ -492,6 +495,10 @@ class GoogleSheets:
     def __init__(self, sheet_id: str) -> None:
         self.sheet_id: str = sheet_id
         self.service: Resource = self._load_service()
+        
+        if not self.is_valid_sheet():
+            raise InvalidSheetException(
+                f"ID table '{self.sheet_id}' is invalid")
 
 
     def _load_service(self) -> Optional[Resource]:
@@ -522,7 +529,16 @@ class GoogleSheets:
             return None
 
 
-    def update(self, values: list[list], _range: Range) -> int:
+    def update(
+        self, 
+        values: list[list], 
+        _range: Range, 
+        secure_mode: bool = False
+    ) -> int:
+        if secure_mode:
+            if len(self.select(_range)) > 0:
+                return 0
+
         body = {
             "values": values
         }
