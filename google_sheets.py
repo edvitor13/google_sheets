@@ -29,7 +29,9 @@ from exceptions import (
 
 from dataclass import (
     BorderDirection,
-    CellPadding,
+    CellFormat,
+    NumberFormat,
+    Padding,
     BorderDirection,
     ColorStyleColor,
     ColorStyleRgbColor,
@@ -115,13 +117,25 @@ class ColorRGBA(Color):
 
 class Range():
 
-    last_range: Range | None = None
+    last: Range | None = None
 
     _sheetname: str | None
     _start_row: int | None
     _start_col: int | None
     _end_row: int | None
     _end_col: int | None
+
+
+    @staticmethod
+    def by_data(data: list[list], _range: str | Range) -> Range:
+        rg = Range(_range)
+        rows = len(data)
+        cols = len(data[0]) if rows else 0
+
+        rg.set_end_col(rg.get_start_col() + cols - 1)
+        rg.set_end_row(rg.get_start_row() + rows - 1)
+        return rg
+
 
     @overload
     def __init__(self, range: str | Range):
@@ -158,7 +172,7 @@ class Range():
                     "use the example structure: PageName!A6:F10")
             
         self.__consistency_adjust()
-        Range.last_range = self
+        Range.last = self
 
     
     def copy(self, _deepcopy: bool = False) -> Range:
@@ -359,7 +373,9 @@ class Range():
     def set_start_row(self, val: int | None = None) -> Range:
         return self._calc_row_col('_start_row', change=val)
     
-    def get_start_row(self) -> int:
+    def get_start_row(self, index_val: bool = False) -> int:
+        if index_val:
+            return (self._start_row - 1)
         return self._start_row
 
 
@@ -378,8 +394,8 @@ class Range():
     def get_start_letter(self) -> str:
         return self._get_column_name(self.get_start_col())
 
-    def get_start(self) -> str:
-        return f"{self.get_start_letter()}{self.get_start_row()}"
+    def get_start(self, index_val: bool = False) -> str:
+        return f"{self.get_start_letter()}{self.get_start_row(index_val)}"
 
 
     def add_end_row(self, val: int | None = None) -> Range:
@@ -426,6 +442,13 @@ class Range():
     
     def get_sheetname(self) -> str | None:
         return self._sheetname
+
+    
+    def jump_row(self, *, truncate: bool = False) -> Range:
+        self.add_start_row(1)
+        if not truncate:
+            self.add_end_row(1)
+        return self
 
     
     def get_range(self) -> str:
@@ -493,12 +516,61 @@ class GoogleSheets:
 
         self.__multi_execute_mode: bool = False
         self.__multi_batch_updates: list[dict] = []
-        self.__multi_batch_values_updates: list[dict] = []
+        self.__multi_batch_updates_values: list[dict] = []
         
         if not self.is_valid_sheet():
             raise InvalidSheetException(
                 f"ID table '{self.sheet_id}' is invalid")
 
+
+    def __enter__(self) -> GoogleSheets:
+        self.__active_multi_execute()
+        return self
+
+
+    def __exit__(self, *args) -> None:
+        self.__multi_execute()
+        self.__reset_multi_execute()
+
+    
+    def __multi_execute(self):
+        # Update Batch Values
+        body = {"data": []}
+        for batch in self.__multi_batch_updates_values:
+            _batch_copy = batch.copy()
+            _batch_copy.pop("data")
+            body = {**body, **_batch_copy}
+
+            body["data"] = [
+                *body["data"], *batch["data"]]
+        
+        if len(body["data"]):
+            self._execute_batch_update_values(
+                body, cancel_multi_execute=True)
+
+        # Update Batch
+        body = {"requests": []}
+        for batch in self.__multi_batch_updates:
+            body["requests"] = [
+                *body["requests"], *batch["requests"]]
+        
+        if len(body["requests"]):
+            self._execute_batch_update(
+                body, cancel_multi_execute=True)
+
+
+    def __active_multi_execute(self) -> GoogleSheets:
+        self.__reset_multi_execute()
+        self.__multi_execute_mode: bool = True
+        return self
+
+
+    def __reset_multi_execute(self) -> GoogleSheets:
+        self.__multi_execute_mode: bool = False
+        self.__multi_batch_updates: list[dict] = []
+        self.__multi_batch_updates_values: list[dict] = []
+        return self
+    
 
     def _load_service(self) -> Optional[Resource]:
         creds = None
@@ -528,50 +600,12 @@ class GoogleSheets:
             return None
 
 
-    def update(
-        self, 
-        values: list[list], 
-        _range: Range, 
-        secure_mode: bool = False
-    ) -> int:
-        if secure_mode:
-            if len(self.select(_range)) > 0:
-                return 0
-
-        body = {
-            "values": values
-        }
-
-        result = self.service.spreadsheets().values().update( # type: ignore
-            spreadsheetId=self.sheet_id, range=_range.get_range(),
-            valueInputOption="USER_ENTERED", body=body).execute()
-
-        return int(result.get('updatedCells'))
-
-
-    def sheetpage_name_by_range(self, range: str):
-        return range.split("!", 1)[0]
-
-
-    def sheetpage_id_by_name(self, name_range: str):
-        try:
-            obj = self.service.spreadsheets().get( # type: ignore
-                spreadsheetId=self.sheet_id, 
-                ranges=self.sheetpage_name_by_range(name_range), 
-                fields='sheets(data(rowData(values(userEnteredFormat))),properties(sheetId))'
-            ).execute()
-
-            return obj['sheets'][0]['properties']['sheetId']
-        except:
-            return None
-
-
     def _execute_batch_update(
         self, body: dict, *, cancel_multi_execute: bool=False
-    ):
+    ) -> bool | None:
         if self.__multi_execute_mode and not cancel_multi_execute:
             self.__multi_batch_updates.append(body)
-            return self
+            return None
 
         try:
             self.service.spreadsheets().batchUpdate(  # type: ignore
@@ -582,32 +616,70 @@ class GoogleSheets:
             print(e)
             return False
 
-    
-    def multi_execute(self, *args):
+
+    def _execute_batch_update_values(
+        self, body: dict, *, cancel_multi_execute: bool=False
+    ) -> int | None:
+        if self.__multi_execute_mode and not cancel_multi_execute:
+            self.__multi_batch_updates_values.append(body)
+            return None
+
         try:
-            requests = {"requests": []}
-            for batch in self.__multi_batch_updates:
-                requests["requests"] = [
-                    *requests["requests"], *batch["requests"]]
-            
-            
-        finally:
-            self.__reset_multi_execute()
+            result = self.service.spreadsheets().values().batchUpdate(  # type: ignore
+                spreadsheetId=self.sheet_id, body=body
+            ).execute()
+            return int(result['responses'][0]['updatedCells'])
+        except Exception as e:
+            print(e)
+            return 0
 
 
-    def __reset_multi_execute(self):
-        self.__multi_execute_mode: bool = False
-        self.__multi_batch_updates: list[dict] = []
-        self.__multi_batch_values_updates: list[dict] = []
+    def update(
+        self, 
+        values: list[list], 
+        _range: Range, 
+        secure_mode: bool = False
+    ) -> int | None:
+        if secure_mode:
+            if len(self.select(_range)) > 0:
+                return 0
+
+        body = {
+            "data": [
+                {
+                    "range": _range.get_range(),
+                    "values": values
+                }
+            ],
+            "valueInputOption": "USER_ENTERED"
+        }
+
+        return self._execute_batch_update_values(body)
+
+
+    def sheetpage_id_by_name(self, name: str):
+        try:
+            obj = self.service.spreadsheets().get( # type: ignore
+                spreadsheetId=self.sheet_id, 
+                ranges=name, 
+                fields='sheets(data(rowData(values(userEnteredFormat))),properties(sheetId))'
+            ).execute()
+
+            return obj['sheets'][0]['properties']['sheetId']
+        except:
+            return None
 
 
     def format_text(
         self,
         _range: Range,
         format: TextFormat
-    ) -> bool | GoogleSheets:
+    ) -> bool | None:
 
         _range_api_format = _range.get_google_sheet_api_format(self)
+
+        format_dict = format.dict(by_alias=True, exclude_unset=True)
+        fields = format.fields("userEnteredFormat.textFormat", format_dict)
 
         body = {
             "requests": [
@@ -616,24 +688,56 @@ class GoogleSheets:
                         "range": _range_api_format,
                         "cell": {
                             "userEnteredFormat": {
-                                "textFormat": format.dict(
-                                    by_alias=True, exclude_unset=True)
+                                "textFormat": format_dict
                             }
                         },
-                        "fields": "userEnteredFormat.textFormat"
+                        "fields": fields
                     }
                 }
-            ],
-            # "data": [
-            #     {
-            #         "range": _range.get_range(),
-            #         "values": [["oLÁ, TUDO BEM?"], ["Novo Teste"]]
-            #     }
-            # ],
-            # 'valueInputOption': "USER_ENTERED"
+            ]
         }
 
         return self._execute_batch_update(body)
+
+    
+    def clear_format_text(self, _range: Range) -> bool | None:
+        return self.format_text(_range, TextFormat())
+
+    
+    def format_cell(
+        self,
+        _range: Range,
+        format: CellFormat
+    ) -> bool | None:
+
+        _range_api_format = _range.get_google_sheet_api_format(self)
+
+        format_dict = format.dict(by_alias=True, exclude_unset=True)
+
+        if len(format_dict):
+            fields = format.fields("userEnteredFormat", format_dict)
+        else:
+            fields = format.fields("userEnteredFormat")
+
+        body = {
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": _range_api_format,
+                        "cell": {
+                            "userEnteredFormat": format_dict
+                        },
+                        "fields": fields
+                    }
+                }
+            ]
+        }
+
+        return self._execute_batch_update(body)
+
+
+    def clear_cell(self, _range: Range):
+        return self.format_cell(_range, CellFormat())
 
 
     def add_border(
@@ -643,7 +747,7 @@ class GoogleSheets:
         style: BorderStyle | None = BorderStyle.SOLID,
         color: Color | ThemeColorType | None = Color(0, 0, 0),
         direction: BorderDirection = BorderDirection()
-    ) -> bool | GoogleSheets:
+    ) -> bool | None:
 
         _borders = dict()
         if style is not None:
@@ -717,7 +821,7 @@ class GoogleSheets:
         
         return rows
 
-    
+
     def is_valid_sheet(self) -> bool:
         try:
             self.service.spreadsheets().values().get( # type: ignore
@@ -741,38 +845,87 @@ if __name__ == '__main__':
         ["Teste", "134"],
         ["Vitor", "27"],
         ["Novo", "Teste"],
-        ["Mais", "Um Teste"]
+        ["Mais", "Um Teste"],
+        ["Total", f"=SUM(C3:C6)"]
     ]
-    
-    # Inserindo dados
-    gs.update(data, rg)
 
-    # Adicionando Borda
-    gs.add_border(
-        rg.add_end_row(len(data) + 1)
-    )
     
-    # Deixando Cabeçalho em Negrito
-    gs.format_text(
-        rg.copy().set_end_row(rg.get_start_row()), 
-        TextFormat(bold=True)
-    )
-    
-    # Mudando fonte do conteúdo para Comic Sans
-    gs.format_text(
-        rg.copy().add_start_row(1), 
-        TextFormat(
-            font_family=TextFontFamily.COMIC_SANS_MS,
-            foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()
+    with gs:
+        # Inserindo dados
+        gs.update(data, rg)
+        
+        # Adicionando Borda
+        gs.add_border(Range.by_data(data, rg))
+
+        # Alinhando conteúdo para Direita
+        gs.format_cell(
+            Range.last.jump_row(truncate=True),
+            CellFormat(
+                horizontal_alignment=CellHorizontalAlign.RIGHT
+            )
         )
-    )
+        
+        # Deixando Cabeçalho em Negrito
+        gs.format_text(
+            Range(rg).set_end_row(rg.get_start_row()), 
+            TextFormat(
+                bold=True, 
+                foreground_color_style=ColorStyleThemeColor(theme_color=ThemeColorType.TEXT),
+                font_family=TextFontFamily.ROBOTO
+            )
+        )
 
-    gs.update([["3"], ["4"], ["5"]], Range(rg.get_sheetname(), "C4", None))
+        gs.format_cell(
+            Range.last,
+            CellFormat(
+                horizontal_alignment=CellHorizontalAlign.CENTER,
+                background_color_style=ColorRGBA(222, 222, 222).to_color_style()
+            )
+        )
+        
+        # Mudando fonte do conteúdo para Comic Sans
+        gs.format_text(
+            rg.copy().add_start_row(1), 
+            TextFormat(
+                font_family=TextFontFamily.COMIC_SANS_MS,
+                foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()
+            )
+        )
 
-    gs.format_text(
-        Range.last_range
-        .sub_start_row(1)
-        .set_end_col(Range.last_range.get_start_col())
-        .set_end_row(Range.last_range.get_start_row() + 4),
-        TextFormat(underline=True)
-    )
+        gs.update(
+            [["123"], ["3"], ["4"], ["5"]], 
+            Range(rg.get_sheetname(), "C3", None)
+        )
+
+        gs.format_text(
+            Range.last
+                .set_end_col(Range.last.get_start_col())
+                .set_end_row(Range.last.get_start_row(True) + 4),
+            TextFormat(underline=True)
+        )
+
+        gs.format_cell(
+            Range.last,
+            CellFormat(
+                background_color_style=ColorRGBA(225.9, 80.4, 131.4).to_color_style(),
+                number_format=NumberFormat(type=NumberFormatType.CURRENCY)
+            )
+        )
+
+        gs.format_cell(
+            Range.last.copy().sub_start_col(1).sub_end_col(1),
+            CellFormat(
+                horizontal_alignment=CellHorizontalAlign.CENTER
+            )
+        )
+
+        gs.format_text(
+            Range.last,
+            TextFormat(
+                foreground_color_style=ColorStyleThemeColor(
+                    theme_color=ThemeColorType.THEME_COLOR_TYPE_UNSPECIFIED))
+        )
+
+        # gs.clear_format_text(rg)
+
+        # gs.format_text(rg, TextFormat(foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()))

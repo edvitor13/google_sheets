@@ -53,6 +53,12 @@ class CellTextDirection(Enum):
     RIGHT_TO_LEFT = "RIGHT_TO_LEFT"
 
 
+class CellHyperlinkDisplayType(Enum):
+    HYPERLINK_DISPLAY_TYPE_UNSPECIFIED = "HYPERLINK_DISPLAY_TYPE_UNSPECIFIED"
+    LINKED = "LINKED"
+    PLAIN_TEXT = "PLAIN_TEXT"
+
+
 class TextFontFamily(Enum):
     DEFAULT = "Arial"
     AMATIC_SC = "Amatic SC"
