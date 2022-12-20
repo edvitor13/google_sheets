@@ -1,5 +1,5 @@
 from typing import Optional, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 from enums import (
     CellHorizontalAlign,
@@ -31,6 +31,7 @@ class DataClassSupport(BaseModel):
             return base_name.rstrip(".")
         
         return ",".join([f"{base_name}{k}" for k in _dict.keys()])
+
 
     class Config:
         alias_generator = _to_camel_case
@@ -105,7 +106,7 @@ class TextRotation(DataClassSupport):
 
 class TextFormat(DataClassSupport):
     foreground_color_style: Optional[
-        Union[ColorStyleRgbColor, ColorStyleThemeColor]] = None
+        Union[ColorStyleRgbColor, ColorStyleThemeColor, ThemeColorType]] = None
     font_family: Optional[TextFontFamily] = None
     font_size: Optional[int] = None
     bold: Optional[bool] = None
@@ -114,11 +115,17 @@ class TextFormat(DataClassSupport):
     underline: Optional[bool] = None
     link: Optional[Link] = None
 
+    @validator("*", pre=True)
+    def convert_theme_color_type(cls, value):
+        if type(value) is ThemeColorType:
+            return ColorStyleThemeColor(theme_color=value)
+        return value
+
 
 class CellFormat(DataClassSupport):
     number_format: Optional[NumberFormat] = None
     background_color_style: Optional[
-        Union[ColorStyleRgbColor, ColorStyleThemeColor]] = None
+        Union[ColorStyleRgbColor, ColorStyleThemeColor, ThemeColorType]] = None
     padding: Optional[Padding] = None
     horizontal_alignment: Optional[CellHorizontalAlign] = None
     vertical_alignment: Optional[CellVerticalAlign] = None
@@ -126,3 +133,9 @@ class CellFormat(DataClassSupport):
     text_direction: Optional[CellTextDirection] = None
     hyperlink_display_type: Optional[CellHyperlinkDisplayType]
     text_rotation: Optional[TextRotation]
+    
+    @validator("*", pre=True)
+    def convert_theme_color_type(cls, value):
+        if type(value) is ThemeColorType:
+            return ColorStyleThemeColor(theme_color=value)
+        return value
