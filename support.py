@@ -3,8 +3,7 @@ from typing import overload
 import re
 from copy import deepcopy, copy
 
-from dataclass import ColorStyleColor, ColorStyleRgbColor
-from exceptions import EmptyRangeException, InvalidRangeException
+from .exceptions import EmptyRangeException, InvalidRangeException
 
 
 
@@ -44,10 +43,6 @@ class Color():
             "blue": self.blue,
             "alpha": self.alpha
         }
-    
-
-    def to_color_style(self) -> ColorStyleRgbColor:
-        return ColorStyleRgbColor(rgb_color=ColorStyleColor(**self.dict()))
 
 
     def __str__(self) -> str:

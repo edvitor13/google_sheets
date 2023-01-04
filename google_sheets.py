@@ -8,46 +8,44 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build, Resource
 from googleapiclient.errors import HttpError
 
-from enums import (
+from .enums import (
     BorderStyle,
-    ThemeColorType,
-    CellVerticalAlign,
-    CellHorizontalAlign,
-    CellWrapStrategy,
-    CellTextDirection,
-    TextFontFamily,
-    NumberFormatType
+    MergeType,
+    ThemeColorType
 )
 
-from exceptions import (
-    EmptyRangeException,
-    InvalidRangeException,
-    InvalidSheetException
-)
+from .exceptions import InvalidSheetException, InvalidAuth
 
-from dataclass import (
+from .dataclass import (
     BorderDirection,
     CellFormat,
-    NumberFormat,
-    Padding,
     BorderDirection,
-    ColorStyleColor,
-    ColorStyleRgbColor,
-    ColorStyleThemeColor,
-    Link,
     TextFormat
 )
 
-from support import Color, ColorRGBA, Range
+from .support import Color, Range
 
 
 
 class GoogleSheets:
 
-    def __init__(self, sheet_id: str) -> None:
-        self.sheet_id: str = sheet_id
-        self.service: Resource = self._load_service()
+    client_secret_filename: str = "auth/client_secret.json"
+    token_filename: str = "auth/token.json"
 
+    def __init__(
+        self, 
+        sheet_id: str, 
+        *, 
+        client_secret_filename: Optional[str] = None,
+        token_filename: Optional[str] = None
+    ) -> None:
+        self.__client_secret_filename: str = GoogleSheets.client_secret_filename
+        self.__token_filename: str = GoogleSheets.token_filename
+
+        self.sheet_id: str = sheet_id
+        self.service: Resource = self.__load_service(
+            client_secret_filename, token_filename)
+        
         self.__multi_execute_mode: bool = False
         self.__multi_batch_updates: list[dict] = []
         self.__multi_batch_updates_values: list[dict] = []
@@ -106,7 +104,17 @@ class GoogleSheets:
         return self
     
 
-    def _load_service(self) -> Optional[Resource]:
+    def __load_service(
+        self, 
+        client_secret_filename: Optional[str], 
+        token_filename: Optional[str]
+    ) -> Resource:
+        if client_secret_filename is not None:
+            self.__client_secret_filename = client_secret_filename
+        
+        if token_filename is not None:
+            self.__token_filename = token_filename
+
         creds = None
 
         SCOPES = [
@@ -114,24 +122,31 @@ class GoogleSheets:
             'https://www.googleapis.com/auth/spreadsheets'
         ]
 
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        if not os.path.exists(self.__client_secret_filename):
+            raise InvalidAuth(
+                "Could not find client configuration file: "
+                f"'{self.__client_secret_filename}'"
+            )
+
+        if os.path.exists(self.__token_filename):
+            creds = Credentials.from_authorized_user_file(
+                self.__token_filename, SCOPES)
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    'client_secret.json', SCOPES)
+                    self.__client_secret_filename, SCOPES)
                 creds = flow.run_local_server(port=0)
             
-            with open('token.json', 'w') as token:
+            with open(self.__token_filename, 'w') as token:
                 token.write(creds.to_json())
 
         try:
             return build('sheets', 'v4', credentials=creds)
-        except HttpError as error:
-            return None
+        except HttpError as e:
+            raise InvalidAuth(e)
 
 
     def _execute_batch_update(
@@ -295,8 +310,37 @@ class GoogleSheets:
         return self._execute_batch_update(body)
 
 
-    def clear_cell(self, _range: Range):
+    def clear_format_cell(self, _range: Range):
         return self.format_cell(_range, CellFormat())
+
+
+    def merge_cell(
+        self,
+        _range: Range,
+        _type: MergeType | None = MergeType.MERGE_ALL
+    ) -> bool | None:
+        _range_api_format = self._range_to_api_format(_range)
+
+        _merge_request = "unmergeCells" if _type is None else "mergeCells"
+
+        body = {
+            "requests": [
+                {
+                    _merge_request: {
+                        "range": _range_api_format
+                    }
+                }
+            ]
+        }
+
+        if _merge_request == "mergeCells":
+            body['requests'][0][_merge_request]['mergeType'] = _type.value
+
+        return self._execute_batch_update(body)
+
+
+    def clear_merge_cell(self, _range: Range) -> bool | None:
+        return self.merge_cell(_range, None)
 
 
     def add_border(
@@ -393,98 +437,3 @@ class GoogleSheets:
     @staticmethod
     def login():
         GoogleSheets("")
-
-
-
-if __name__ == '__main__':
-    rg = Range("Página1!B2:C")
-    gs = GoogleSheets('1w1DrzoVgsNXnMg24YU7UtF6gK5AZMh3ZAAwGg9hPKfo')
-    
-    data = [
-        ["NOME", "IDADE"],
-        ["Teste", "134"],
-        ["Vitor", "27"],
-        ["Novo", "Teste"],
-        ["Mais", "Um Teste"],
-        ["Total", f"=SUM(C3:C6)"]
-    ]
-
-    
-    with gs:
-        # Inserindo dados
-        gs.update(data, rg)
-        
-        # Adicionando Borda
-        gs.add_border(Range.by_data(data, rg))
-
-        # Alinhando conteúdo para Direita
-        gs.format_cell(
-            Range.last.jump_row(truncate=True),
-            CellFormat(
-                horizontal_alignment=CellHorizontalAlign.RIGHT
-            )
-        )
-        
-        # Deixando Cabeçalho em Negrito
-        gs.format_text(
-            Range(rg).set_end_row(rg.get_start_row()), 
-            TextFormat(
-                bold=True, 
-                foreground_color_style=ThemeColorType.TEXT,
-                font_family=TextFontFamily.ROBOTO
-            )
-        )
-
-        gs.format_cell(
-            Range.last,
-            CellFormat(
-                horizontal_alignment=CellHorizontalAlign.CENTER,
-                background_color_style=ColorRGBA(222, 222, 222).to_color_style()
-            )
-        )
-        
-        # Mudando fonte do conteúdo para Comic Sans
-        gs.format_text(
-            rg.copy().add_start_row(1), 
-            TextFormat(
-                font_family=TextFontFamily.COMIC_SANS_MS,
-                foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()
-            )
-        )
-
-        gs.update(
-            [["123"], ["3"], ["4"], ["5"]], 
-            Range(rg.get_sheetname(), "C3", None)
-        )
-
-        gs.format_text(
-            Range.last
-                .set_end_col(Range.last.get_start_col())
-                .set_end_row(Range.last.get_start_row(True) + 4),
-            TextFormat(underline=True)
-        )
-
-        gs.format_cell(
-            Range.last,
-            CellFormat(
-                background_color_style=ColorRGBA(225.9, 80.4, 131.4).to_color_style(),
-                number_format=NumberFormat(type=NumberFormatType.CURRENCY)
-            )
-        )
-
-        gs.format_cell(
-            Range.last.copy().sub_start_col(1).sub_end_col(1),
-            CellFormat(
-                horizontal_alignment=CellHorizontalAlign.CENTER
-            )
-        )
-
-        gs.format_text(
-            Range.last,
-            TextFormat(
-                foreground_color_style=ThemeColorType.THEME_COLOR_TYPE_UNSPECIFIED)
-        )
-
-        # gs.clear_format_text(rg)
-
-        # gs.format_text(rg, TextFormat(foreground_color_style=ColorRGBA(255, 0, 0).to_color_style()))

@@ -6,3 +6,7 @@ class EmptyRangeException(Exception):
 
 class InvalidSheetException(Exception):
     pass
+
+
+class InvalidAuth(Exception):
+    pass

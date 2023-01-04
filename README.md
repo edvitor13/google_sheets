@@ -1,4 +1,4 @@
-# GoogleSheets 0.0.1
+# GoogleSheets v1.0.0 beta 1
 
 Módulo criado com o objetivo de facilitar a edição de planilhas do Google.
 

@@ -1,7 +1,9 @@
+from __future__ import annotations
 from typing import Optional, Union
 from pydantic import BaseModel, validator
 
-from enums import (
+from .enums import (
+    BorderStyle,
     CellHorizontalAlign,
     CellHyperlinkDisplayType, 
     CellTextDirection, 
@@ -12,6 +14,8 @@ from enums import (
     TextFontFamily
 )
 
+from .support import Color
+
 
 
 def _to_camel_case(snake_case_text: str) -> str:
@@ -20,6 +24,13 @@ def _to_camel_case(snake_case_text: str) -> str:
 
 
 class DataClassSupport(BaseModel):
+
+    class Config:
+        alias_generator = _to_camel_case
+        allow_population_by_field_name = True
+        use_enum_values = True
+        arbitrary_types_allowed = True
+
 
     def fields(self, base_name: str, _dict: Optional[dict] = None) -> str:
         if _dict is None:
@@ -32,11 +43,11 @@ class DataClassSupport(BaseModel):
         
         return ",".join([f"{base_name}{k}" for k in _dict.keys()])
 
+    
+    @staticmethod
+    def color_to_style(color: Color) -> ColorStyleRgbColor:
+        return ColorStyleRgbColor(rgb_color=ColorStyleColor(**color.dict()))
 
-    class Config:
-        alias_generator = _to_camel_case
-        allow_population_by_field_name = True
-        use_enum_values = True
 
 
 class Padding(DataClassSupport):
@@ -105,8 +116,7 @@ class TextRotation(DataClassSupport):
 
 
 class TextFormat(DataClassSupport):
-    foreground_color_style: Optional[
-        Union[ColorStyleRgbColor, ColorStyleThemeColor, ThemeColorType]] = None
+    foreground_color_style: Optional[Union[Color, ThemeColorType, ColorStyleRgbColor, ColorStyleThemeColor]] = None
     font_family: Optional[TextFontFamily] = None
     font_size: Optional[int] = None
     bold: Optional[bool] = None
@@ -119,13 +129,16 @@ class TextFormat(DataClassSupport):
     def convert_theme_color_type(cls, value):
         if type(value) is ThemeColorType:
             return ColorStyleThemeColor(theme_color=value)
+                    
+        if isinstance(value, Color):
+            return cls.color_to_style(value)
+        
         return value
 
 
 class CellFormat(DataClassSupport):
     number_format: Optional[NumberFormat] = None
-    background_color_style: Optional[
-        Union[ColorStyleRgbColor, ColorStyleThemeColor, ThemeColorType]] = None
+    background_color_style: Optional[Union[Color, ThemeColorType, ColorStyleRgbColor, ColorStyleThemeColor]] = None
     padding: Optional[Padding] = None
     horizontal_alignment: Optional[CellHorizontalAlign] = None
     vertical_alignment: Optional[CellVerticalAlign] = None
@@ -138,4 +151,54 @@ class CellFormat(DataClassSupport):
     def convert_theme_color_type(cls, value):
         if type(value) is ThemeColorType:
             return ColorStyleThemeColor(theme_color=value)
+        
+        if isinstance(value, Color):
+            return cls.color_to_style(value)
+        
         return value
+
+class Border(DataClassSupport):
+    style: BorderStyle = None
+    color_style: Union[Color, ThemeColorType, ColorStyleRgbColor, ColorStyleThemeColor] = None
+
+    @validator("*", pre=True)
+    def convert_theme_color_type(cls, value):
+        if type(value) is ThemeColorType:
+            return ColorStyleThemeColor(theme_color=value)
+        
+        if isinstance(value, Color):
+            return cls.color_to_style(value)
+        
+        return value
+
+
+class BorderClassicFormat(DataClassSupport):
+    style: BorderStyle = BorderStyle.SOLID
+    color: Union[Color, ThemeColorType, ColorStyleRgbColor, ColorStyleThemeColor] = Color(0, 0, 0)
+    direction: BorderDirection = BorderDirection()
+
+    @validator("*", pre=True)
+    def convert_theme_color_type(cls, value):
+        if type(value) is ThemeColorType:
+            return ColorStyleThemeColor(theme_color=value)
+        
+        if isinstance(value, Color):
+            return cls.color_to_style(value)
+        
+        return value
+    
+    def to_format(self) -> BorderFormat:
+        return BorderFormat(
+            style=self.style,
+            color=self.color,
+            direction=self.direction
+        )
+
+
+class BorderFormat(DataClassSupport):
+    top: Optional[Border]
+    bottom: Optional[Border]
+    left: Optional[Border]
+    right: Optional[Border]
+    innerHorizontal: Optional[Border]
+    innerVertical: Optional[Border]
