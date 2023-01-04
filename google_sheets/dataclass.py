@@ -82,6 +82,7 @@ class ColorStyleThemeColor(DataClassSupport):
 class Link(DataClassSupport):
     uri: str
 
+
 class NumberFormat(DataClassSupport):
     """
     pattern examples
@@ -156,6 +157,7 @@ class CellFormat(DataClassSupport):
             return cls.color_to_style(value)
         
         return value
+
 
 class Border(DataClassSupport):
     style: BorderStyle = None
