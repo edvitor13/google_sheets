@@ -27,7 +27,7 @@ class DataClassSupport(BaseModel):
 
     class Config:
         alias_generator = _to_camel_case
-        allow_population_by_field_name = True
+        populate_by_name = True
         use_enum_values = True
         arbitrary_types_allowed = True
 
